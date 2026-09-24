@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.eri.deltabypass"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.eri.deltabypass"
