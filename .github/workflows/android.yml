@@ -4,49 +4,40 @@ on:
     branches:
       - main
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android 37 platform
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
           echo "Using sdkmanager: $SM"
-          "$SM" --update || true
           yes | "$SM" --licenses > /dev/null || true
-          "$SM" "platform-tools" "platforms;android-37" "build-tools;37.0.0" || "$SM" "platform-tools" "platforms;android-37" "build-tools;36.0.0"
-
+          "$SM" "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+          # compileSdk=37 找 platforms/android-37，但实际安装目录是 android-37.0，补软链接
+          if [ -d "$SDK/platforms/android-37.0" ] && [ ! -e "$SDK/platforms/android-37" ]; then
+            ln -s "$SDK/platforms/android-37.0" "$SDK/platforms/android-37"
+          fi
+          ls -la "$SDK/platforms/"
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
-
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apk
           path: app/build/outputs/apk/release/app-release.apk
-
       - name: Upload Debug APK
         if: success()
         uses: actions/upload-artifact@v4
