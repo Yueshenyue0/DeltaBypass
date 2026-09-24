@@ -34,35 +34,10 @@ class DeltaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Delta Bypass',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00E5FF),
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xFF0A0E14),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0A0E14),
-          elevation: 0,
-          centerTitle: true,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF11161F),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF1E2632)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF1E2632)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.4),
-          ),
-        ),
-      ),
+      // 标准 Material 3，跟随系统深浅色，控件全部用主题默认样式
+      theme: ThemeData(useMaterial3: true),
+      darkTheme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
+      themeMode: ThemeMode.system,
       home: const BypassPage(),
     );
   }
@@ -82,13 +57,14 @@ class BypassPage extends StatefulWidget {
 }
 
 class _BypassPageState extends State<BypassPage> {
-  static const cNet = Color(0xFF00E5FF);
-  static const cTls = Color(0xFF7C4DFF);
-  static const cPool = Color(0xFF00E676);
-  static const cCap = Color(0xFFFFD740);
-  static const cKey = Color(0xFF69F0AE);
-  static const cErr = Color(0xFFFF5370);
-  static const cDim = Color(0xFF5C6B7A);
+  // 输出栏内的日志配色（仅终端框内部）
+  static const cNet = Color(0xFF00ACC1);
+  static const cTls = Color(0xFF7E57C2);
+  static const cPool = Color(0xFF43A047);
+  static const cCap = Color(0xFFFB8C00);
+  static const cKey = Color(0xFF2E7D32);
+  static const cErr = Color(0xFFE53935);
+  static const cDim = Color(0xFF9E9E9E);
 
   final _linkCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
@@ -213,6 +189,7 @@ class _BypassPageState extends State<BypassPage> {
   @override
   Widget build(BuildContext context) {
     final done = _resultKey.isNotEmpty;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Delta Bypass')),
       body: SingleChildScrollView(
@@ -220,58 +197,52 @@ class _BypassPageState extends State<BypassPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 标准 MD3 TextField
             TextField(
               controller: _linkCtrl,
               enabled: !_running,
-              style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
               decoration: const InputDecoration(
                 labelText: '输入忍者链接',
                 hintText: '$linkPrefix...',
-                labelStyle: TextStyle(color: Color(0xFF00E5FF)),
               ),
             ),
-            const SizedBox(height: 14),
-            FilledButton.icon(
+            const SizedBox(height: 16),
+            // 标准 MD3 FilledButton（主题默认配色）
+            FilledButton(
               onPressed: _running ? null : _start,
-              icon: _running
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                    )
-                  : const Icon(Icons.bolt),
-              label: Text(_running ? '绕过中...' : '绕过'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF00E5FF),
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(_running ? '绕过中...' : '绕过'),
               ),
             ),
-            const SizedBox(height: 18),
-            const Text('输出：', style: TextStyle(color: Color(0xFF5C6B7A), fontSize: 13, letterSpacing: 1)),
-            const SizedBox(height: 6),
+            const SizedBox(height: 20),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '输出：',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            const SizedBox(height: 8),
+            // 终端风格输出框（仅这里保留暗色）
             AnimatedContainer(
               duration: const Duration(milliseconds: 400),
               height: done ? 150 : 300,
               decoration: BoxDecoration(
-                color: const Color(0xFF050810),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF14202E)),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF00E5FF).withOpacity(0.06),
-                    blurRadius: 18,
-                    spreadRadius: 1,
-                  ),
-                ],
+                color: const Color(0xFF101418),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF2A2F36)),
               ),
               padding: const EdgeInsets.all(12),
               child: _logs.isEmpty
                   ? const Center(
                       child: Text(
                         '> 等待输入链接_',
-                        style: TextStyle(color: Color(0xFF2A3A4A), fontSize: 13, fontFamily: 'monospace'),
+                        style: TextStyle(
+                          color: Color(0xFF4A5560),
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     )
                   : ListView.builder(
@@ -295,50 +266,45 @@ class _BypassPageState extends State<BypassPage> {
                     ),
             ),
             const SizedBox(height: 8),
+            // 标准 MD3 进度条（主题默认配色）
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
                 value: _progress,
                 minHeight: 4,
-                backgroundColor: const Color(0xFF11161F),
-                valueColor: AlwaysStoppedAnimation(
-                  _failed ? const Color(0xFFFF5370) : const Color(0xFF00E5FF),
-                ),
+                color: _failed ? scheme.error : null,
+                backgroundColor: scheme.surfaceContainerHighest,
               ),
             ),
             if (done) ...[
               const SizedBox(height: 16),
+              // 标准 MD3 Card
               Card(
-                color: const Color(0xFF0D1420),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(color: const Color(0xFF00E5FF).withOpacity(0.45)),
-                ),
+                margin: EdgeInsets.zero,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 6, 14),
+                  padding: const EdgeInsets.fromLTRB(16, 14, 4, 10),
                   child: Row(
                     children: [
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('KEY', style: TextStyle(color: Color(0xFF5C6B7A), fontSize: 11, letterSpacing: 2)),
+                            Text('KEY', style: Theme.of(context).textTheme.labelSmall),
                             const SizedBox(height: 4),
                             SelectableText(
                               _resultKey,
-                              style: const TextStyle(
-                                color: Color(0xFF69F0AE),
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                              ),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontFamily: 'monospace'),
                             ),
                           ],
                         ),
                       ),
+                      // 标准 MD3 IconButton
                       IconButton(
                         tooltip: '复制',
-                        icon: const Icon(Icons.copy_rounded, color: Color(0xFF00E5FF)),
+                        icon: const Icon(Icons.copy),
                         onPressed: () async {
                           await Clipboard.setData(ClipboardData(text: _resultKey));
                           if (context.mounted) {
@@ -350,7 +316,7 @@ class _BypassPageState extends State<BypassPage> {
                       ),
                       IconButton(
                         tooltip: '重新开始',
-                        icon: const Icon(Icons.refresh_rounded, color: Color(0xFF5C6B7A)),
+                        icon: const Icon(Icons.refresh),
                         onPressed: _reset,
                       ),
                     ],
