@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -37,6 +38,8 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import android.content.Context
+import java.security.MessageDigest
 import kotlin.random.Random
 
 private const val LINK_PREFIX = "https://auth.platorelay.com/a?d="
@@ -65,6 +68,45 @@ private fun randPing(): Int = Random.nextInt(80, 260)
 
 private fun randMs(from: Long, until: Long): Long = Random.nextLong(from, until)
 
+private const val PREFS_NAME = "delta_bypass_cache"
+
+private fun linkId(link: String): String {
+    return try {
+        val md = MessageDigest.getInstance("SHA-256")
+        val bytes = md.digest(link.toByteArray(Charsets.UTF_8))
+        val sb = StringBuilder()
+        for (i in 0 until 8) {
+            sb.append(String.format("%02x", bytes[i].toInt() and 0xFF))
+        }
+        sb.toString()
+    } catch (e: Exception) {
+        link.hashCode().toString()
+    }
+}
+
+private fun getCachedKey(ctx: Context, link: String): String? {
+    val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val id = linkId(link)
+    val savedLink = prefs.getString("link_" + id, null) ?: return null
+    if (savedLink != link) return null
+    val key = prefs.getString("key_" + id, null) ?: return null
+    return key.ifEmpty { null }
+}
+
+private fun putCachedKey(ctx: Context, link: String, key: String) {
+    try {
+        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val id = linkId(link)
+        prefs.edit().putString("link_" + id, link).putString("key_" + id, key).apply()
+    } catch (e: Exception) {
+    }
+}
+
+private fun maskKey(key: String): String {
+    if (key.length <= 12) return key + "****"
+    return key.substring(0, 12) + "****"
+}
+
 @Composable
 fun BypassScreen() {
     var link by rememberSaveable { mutableStateOf("") }
@@ -78,6 +120,8 @@ fun BypassScreen() {
     val clipboard = LocalClipboardManager.current
     val logScroll = rememberScrollState()
     val pageScroll = rememberScrollState()
+    val ctx = LocalContext.current
+    val appCtx = remember(ctx) { ctx.applicationContext }
     // 完成后输出框缩小，然后显示key卡片
     val logHeight by animateDpAsState(
         targetValue = if (resultKey.isNotEmpty()) 132.dp else 240.dp,
@@ -104,6 +148,23 @@ fun BypassScreen() {
         copied = false
         logLines.clear()
         running = true
+        val hitKey = getCachedKey(appCtx, trimmed)
+        if (hitKey != null) {
+            // 命中本地缓存：过5秒左右直接给原key，不走完整绕过
+            running = true
+            scope.launch {
+                logLines += "收到链接"
+                delay(randMs(1200, 1800))
+                logLines += "[CACHE] 命中本地缓存 key=${maskKey(hitKey)} ..."
+                delay(randMs(1500, 2000))
+                logLines += "[CACHE] 校验通过，直接返回 (本地命中，无需重绕)"
+                delay(randMs(1300, 1800))
+                logLines += "key获取成功"
+                resultKey = hitKey
+                running = false
+            }
+            return
+        }
         scope.launch {
             // 每次运行都随机生成，与写死区分
             val traceId = randHex(12)
@@ -181,7 +242,9 @@ fun BypassScreen() {
             logLines += "[KEY] HMAC-SHA256校验 key_len=37"
             delay(randMs(1200, 2001))
             logLines += "key获取成功"
-            resultKey = randomFreeKey()
+            val newKey = randomFreeKey()
+            putCachedKey(appCtx, trimmed, newKey)
+            resultKey = newKey
             running = false
         }
     }
