@@ -31,7 +31,8 @@ GitHub → Actions → Android Build → Artifacts → 下载
 | MIUIX | 0.9.4 |
 | activity-compose | 1.13.0 |
 | JDK | 17 |
-| compileSdk / targetSdk | 36 |
+| compileSdk | 37 (miuix 0.9.4 要求) |
+| targetSdk | 36 |
 | minSdk | 29 |
 
 ## 依赖
