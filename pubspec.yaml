@@ -1,5 +1,5 @@
 name: delta_bypass
-description: Delta Bypass - neon terminal style Flutter tool.
+description: Delta Bypass - terminal style Flutter tool.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   flutter_test:

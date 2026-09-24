@@ -1,7 +1,7 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math';
 
 void main() {
   runApp(const DeltaApp());
@@ -25,6 +25,36 @@ String randNode() {
   final n = 1 + Random().nextInt(19);
   return '${zones[Random().nextInt(zones.length)]}-${n.toString().padLeft(2, '0')}';
 }
+
+// 本地缓存：同一链接 -> 原 key（轻量哈希做 key id，另存原链接防碰撞）
+String linkId(String link) {
+  var h = 0;
+  for (final b in link.codeUnits) {
+    h = 0x1fffffff & (h + b);
+    h = 0x1fffffff & (h + ((0x0007ffff & h) << 10));
+    h ^= h >> 6;
+  }
+  h = 0x1fffffff & (h + ((0x03ffffff & h) << 3));
+  h ^= h >> 11;
+  h = 0x1fffffff & (h + ((0x0000ffff & h) << 15));
+  return h.toRadixString(16).padLeft(8, '0');
+}
+
+Future<String?> getCachedKey(String link) async {
+  final prefs = await SharedPreferences.getInstance();
+  final id = linkId(link);
+  if (prefs.getString('link_$id') != link) return null;
+  return prefs.getString('key_$id');
+}
+
+Future<void> putCachedKey(String link, String key) async {
+  final prefs = await SharedPreferences.getInstance();
+  final id = linkId(link);
+  await prefs.setString('link_$id', link);
+  await prefs.setString('key_$id', key);
+}
+
+String maskKey(String k) => k.length <= 12 ? '$k****' : '${k.substring(0, 12)}****';
 
 class DeltaApp extends StatelessWidget {
   const DeltaApp({super.key});
@@ -114,6 +144,23 @@ class _BypassPageState extends State<BypassPage> {
       _progress = 0;
     });
 
+    // 命中本地缓存：约5秒直接返回原 key，不走完整绕过
+    final cached = await getCachedKey(link);
+    if (cached != null) {
+      _log('收到链接', cDim, 0.1);
+      await _sleep(randMs(1200, 1800));
+      _log('[CACHE] 命中本地缓存 key=${maskKey(cached)} ...', cPool, 0.5);
+      await _sleep(randMs(1500, 2000));
+      _log('[CACHE] 校验通过，直接返回 (本地命中，无需重绕)', cPool, 0.85);
+      await _sleep(randMs(1200, 1600));
+      _log('key获取成功', cKey, 1.0);
+      setState(() {
+        _resultKey = cached;
+        _running = false;
+      });
+      return;
+    }
+
     final trace = randHex(12);
     final willFail = Random().nextDouble() < 0.2;
     final failReason = [
@@ -174,6 +221,8 @@ class _BypassPageState extends State<BypassPage> {
       _resultKey = 'FREE_${randHex(32)}';
       _running = false;
     });
+    // 成功后写入本地缓存，下次同一链接直接 5 秒返回
+    await putCachedKey(link, _resultKey);
   }
 
   void _reset() {
