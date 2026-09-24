@@ -86,7 +86,7 @@ class BypassPage extends StatefulWidget {
   State<BypassPage> createState() => _BypassPageState();
 }
 
-class _BypassPageState extends State<BypassPage> {
+class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
   // 输出栏内的日志配色（仅终端框内部）
   static const cNet = Color(0xFF00ACC1);
   static const cTls = Color(0xFF7E57C2);
@@ -106,7 +106,42 @@ class _BypassPageState extends State<BypassPage> {
   String _resultKey = '';
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _readClipboard();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 回到前台时再读一次剪贴板
+    if (state == AppLifecycleState.resumed) _readClipboard();
+  }
+
+  // 自动读取剪贴板：检测到合规链接就填入输入框（不覆盖已有输入）
+  Future<void> _readClipboard() async {
+    if (_running || _linkCtrl.text.isNotEmpty) return;
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim();
+      if (text != null &&
+          text.startsWith(linkPrefix) &&
+          text.length > linkPrefix.length &&
+          _linkCtrl.text.isEmpty &&
+          mounted) {
+        _linkCtrl.text = text;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已自动填入剪贴板中的链接')),
+        );
+      }
+    } catch (_) {
+      // 读取失败静默处理
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _linkCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
