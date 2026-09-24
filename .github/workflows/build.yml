@@ -1,0 +1,50 @@
+name: Build Delta Bypass
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Create Android project files
+        run: flutter create . --project-name delta_bypass --org com.eri --platforms android
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set app label
+        run: |
+          sed -i 's|android:label="delta_bypass"|android:label="Delta Bypass"|' android/app/src/main/AndroidManifest.xml
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-bypass-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14

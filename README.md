@@ -1,46 +1,33 @@
 # Delta Bypass
 
-Kotlin + Jetpack Compose + MIUIX (HyperOS 风格) + GitHub Actions 自动构建的 Android 应用。
+Flutter + Material 3 (MD3) + GitHub Actions 自动构建的 Android 应用。
 
 ## 功能
+- 标题 Delta Bypass，输入框校验链接必须以 `https://auth.platorelay.com/a?d=` 开头，否则提示「链接错误」
+- 点「绕过」后终端风格输出栏依次显示日志（NET / TLS / discord账号池 / captcha / key），每步间隔随机 1~2.5 秒，全程约 15~30 秒
+- 20% 概率在 captcha 后报「绕过失败，请重试」（429/403/401/504 随机原因）
+- 成功生成 `FREE_` + 32 位小写 hex key，输出框缩小，弹出 key 卡片 + 复制按钮
+- 本地 SharedPreferences 缓存：同一链接再次绕过时约 5 秒直接返回原 key
 
-- 底部 Tab：`bypass` / `作者`
-- bypass 页：标题 Delta Bypass，输入框（校验链接必须以 `https://auth.platorelay.com/a?d=` 开头，否则提示"链接错误"），"绕过"按钮
-- 点击绕过后输出框按步骤显示：收到链接 → 正在绕过captcha...（约12~20秒）→ 绕过成功，正在获取key → key获取成功，全程约15~30秒，每步间隔1~2秒
-- 概率（15%）弹出失败："绕过失败，请重试"
-- 成功生成 `FREE_` + 32 位 hex 随机 key；输出框动画缩小，下方弹出 key 卡片 + 复制按钮
-- 作者页：显示 Eri
+## UI 风格
+- Material 3 暗色主题，青色霓虹主色调
+- 输出栏：「输出：」标签 + 近黑背景 + 霓虹发光描边 + 彩色等宽字体（NET青/TLS紫/POOL绿/captcha黄/key绿/错误红）
+- 底部霓虹进度条，完成态变红
 
 ## 构建（GitHub Actions）
+推送到 `main` 或手动触发 workflow，产物：
+- `delta-bypass-apk` → `build/app/outputs/flutter-apk/app-release.apk`
 
-推送到 `main` 分支或手动触发 workflow：
+android/ 骨架由 CI 里 `flutter create .` 生成，仓库不提交 android 目录。
 
-GitHub → Actions → Android Build → Artifacts → 下载
-
-- `android-release-apk`：`app/build/outputs/apk/release/app-release.apk`（debug 签名，可直接安装）
-- `android-debug-apk`：`app/build/outputs/apk/debug/app-debug.apk`
-
-## 版本组合（与 miuix 官方 example 一致）
-
-| 组件 | 版本 |
-| --- | --- |
-| Gradle | 9.7.1 |
-| AGP | 9.4.1 |
-| Kotlin | 2.4.20 |
-| Compose Compiler | Kotlin 插件 `org.jetbrains.kotlin.plugin.compose` 2.4.20 |
-| MIUIX | 0.9.4 |
-| activity-compose | 1.13.0 |
-| JDK | 17 |
-| compileSdk | 37 (miuix 0.9.4 要求) |
-| targetSdk | 36 |
-| minSdk | 29 |
-
-## 依赖
-
-| 库 | 版本 | 坐标 | 用途 |
-| --- | --- | --- | --- |
-| MIUIX UI | 0.9.4 | `top.yukonga.miuix.kmp:miuix-ui-android` | HyperOS 风格组件（用户指定） |
-| MIUIX Icons | 0.9.4 | `top.yukonga.miuix.kmp:miuix-icons-android` | NavigationBarItem / 页面图标 |
-| activity-compose | 1.13.0 | `androidx.activity:activity-compose` | ComponentActivity + setContent |
-
-无网络请求（绕过流程为本地模拟动画），无需 INTERNET 权限。
+## 结构
+```
+project/
+├── lib/
+│   └── main.dart
+├── pubspec.yaml
+├── .github/
+│   └── workflows/
+│       └── build.yml
+└── README.md
+```
