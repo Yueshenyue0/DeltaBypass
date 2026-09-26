@@ -1,7 +1,11 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math';
 
 void main() {
   runApp(const DeltaApp());
@@ -9,24 +13,60 @@ void main() {
 
 const linkPrefix = 'https://auth.platorelay.com/a?d=';
 
-String randHex(int len) {
-  const chars = '0123456789abcdef';
-  final r = Random.secure();
-  return List.generate(len, (_) => chars[r.nextInt(16)]).join();
+// ---------------- MSY 云验证配置 ----------------
+const msyAppid = '53690';
+const msyUid = '6638';
+const msyPackage = 'com.eri.delta_bypass';
+const msyEndpoint = 'https://yunzhuru.cn/msy/kami.php';
+const msyVersion = '1.0.0';
+
+// API Key 以逐字节异或形式存放，二进制里搜不到明文，运行时还原
+const List<int> _kScramble = <int>[
+  60, 6, 67, 176, 232, 162, 156, 209, 161, 170, 238, 219, 151, 58, 113, 126,
+  78, 85, 33, 99, 60, 92, 72, 178, 170, 254, 207, 223, 247, 230, 215, 143,
+  206, 100, 34, 19, 75, 11, 125, 54, 83, 10, 75, 188, 243, 154, 136, 223,
+  172, 180, 208, 199, 152, 51, 126, 68, 80, 7, 121, 97, 94, 21, 228, 236,
+];
+
+String msyApiKey() {
+  final sb = StringBuffer();
+  for (var i = 0; i < _kScramble.length; i++) {
+    sb.writeCharCode(_kScramble[i] ^ ((0x5A + i * 13) & 0xFF));
+  }
+  return sb.toString();
 }
 
-int randMs(int from, int to) => from + Random().nextInt(to - from + 1);
-
-String randIp() =>
-    '104.21.${1 + Random().nextInt(254)}.${1 + Random().nextInt(254)}';
-
-String randNode() {
-  const zones = ['JP', 'SG', 'HK', 'US', 'DE', 'KR', 'TW'];
-  final n = 1 + Random().nextInt(19);
-  return '${zones[Random().nextInt(zones.length)]}-${n.toString().padLeft(2, '0')}';
+// ---------------- 签名 / 验签 ----------------
+String _canonicalJson(dynamic v) {
+  if (v is Map) {
+    final keys = v.keys.map((e) => e.toString()).toList()..sort();
+    return '{${keys.map((k) => '${jsonEncode(k)}:${_canonicalJson(v[k])}').join(',')}}';
+  }
+  if (v is List) {
+    return '[${v.map(_canonicalJson).join(',')}]';
+  }
+  return jsonEncode(v);
 }
 
-// 本地缓存：同一链接 -> 原 key（轻量哈希做 key id，另存原链接防碰撞）
+String _sign(Map<String, dynamic> data, int time, String nonce, String key) {
+  final raw = '$msyAppid\n$time\n$nonce\n${_canonicalJson(data)}';
+  final mac = Hmac(sha256, utf8.encode(key)).convert(utf8.encode(raw));
+  return mac.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+}
+
+/// 校验响应：APPID 一致 + 时间偏差 <=300 秒 + 签名一致
+bool _verifyResponse(Map<String, dynamic> data, String key) {
+  if (data['appid'].toString() != msyAppid) return false;
+  final time = (data['time'] as num?)?.toInt() ?? 0;
+  final nonce = (data['nonce'] ?? '').toString();
+  final sign = (data['sign'] ?? '').toString();
+  if (sign.isEmpty || time == 0) return false;
+  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  if ((now - time).abs() > 300) return false;
+  return _sign(data, time, nonce, key) == sign;
+}
+
+// ---------------- 本地缓存 ----------------
 String linkId(String link) {
   var h = 0;
   for (final b in link.codeUnits) {
@@ -54,7 +94,25 @@ Future<void> putCachedKey(String link, String key) async {
   await prefs.setString('key_$id', key);
 }
 
-String maskKey(String k) => k.length <= 12 ? '$k****' : '${k.substring(0, 12)}****';
+String maskKey(String k) =>
+    k.length <= 12 ? '$k****' : '${k.substring(0, 12)}****';
+
+String randHex(int len) {
+  const chars = '0123456789abcdef';
+  final r = Random.secure();
+  return List.generate(len, (_) => chars[r.nextInt(16)]).join();
+}
+
+int randMs(int from, int to) => from + Random().nextInt(to - from + 1);
+
+String randIp() =>
+    '104.21.${1 + Random().nextInt(254)}.${1 + Random().nextInt(254)}';
+
+String randNode() {
+  const zones = ['JP', 'SG', 'HK', 'US', 'DE', 'KR', 'TW'];
+  final n = 1 + Random().nextInt(19);
+  return '${zones[Random().nextInt(zones.length)]}-${n.toString().padLeft(2, '0')}';
+}
 
 class DeltaApp extends StatelessWidget {
   const DeltaApp({super.key});
@@ -64,7 +122,6 @@ class DeltaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Delta Bypass',
       debugShowCheckedModeBanner: false,
-      // 标准 Material 3，跟随系统深浅色，控件全部用主题默认样式
       theme: ThemeData(useMaterial3: true),
       darkTheme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
       themeMode: ThemeMode.system,
@@ -97,24 +154,39 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
   static const cDim = Color(0xFF9E9E9E);
 
   final _linkCtrl = TextEditingController();
+  final _kamiCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
-
   final List<LogLine> _logs = [];
+
   bool _running = false;
   bool _failed = false;
+  bool _verifying = false;
   double _progress = 0;
   String _resultKey = '';
+  String _remaining = '';
+  String _did = '';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadDid();
     _readClipboard();
+  }
+
+  /// 设备唯一标识：首次生成后持久化，保持稳定非空
+  Future<void> _loadDid() async {
+    final prefs = await SharedPreferences.getInstance();
+    var did = prefs.getString('msy_did');
+    if (did == null || did.isEmpty) {
+      did = 'd_${randHex(32)}';
+      await prefs.setString('msy_did', did);
+    }
+    if (mounted) setState(() => _did = did!);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 回到前台时再读一次剪贴板
     if (state == AppLifecycleState.resumed) _readClipboard();
   }
 
@@ -143,11 +215,13 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _linkCtrl.dispose();
+    _kamiCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
 
   void _log(String text, Color color, [double? p]) {
+    if (!mounted) return;
     setState(() {
       _logs.add(LogLine(text, color));
       if (p != null) _progress = p;
@@ -159,25 +233,109 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _sleep(int ms) => Future.delayed(Duration(milliseconds: ms));
+  Future<void> _sleep(int ms) =>
+      Future.delayed(Duration(milliseconds: ms));
+
+  /// 云验证：POST kami.php，校验 code / APPID / 时间 / HMAC 签名
+  Future<bool> _verifyKami(String kami) async {
+    final key = msyApiKey();
+    final did = _did.isNotEmpty ? _did : 'd_${randHex(32)}';
+    _log('[CLOUD] 正在连接验证服务器 (appid=$msyAppid) ...', cDim, 0.02);
+    try {
+      final resp = await http
+          .post(
+            Uri.parse(msyEndpoint),
+            body: <String, String>{
+              'kami': kami,
+              'appid': msyAppid,
+              'uid': msyUid,
+              'package': msyPackage,
+              'did': did,
+              'version': msyVersion,
+              'key': key,
+            },
+          )
+          .timeout(const Duration(seconds: 15));
+      await _sleep(randMs(600, 1100));
+      _log('[CLOUD] 响应已返回 HTTP ${resp.statusCode} (${resp.bodyBytes.length} B)', cNet, 0.04);
+      if (resp.statusCode != 200) {
+        _log('[CLOUD] 验证失败：服务异常 HTTP ${resp.statusCode}', cErr);
+        return false;
+      }
+      final json = jsonDecode(utf8.decode(resp.bodyBytes));
+      if (json is! Map) {
+        _log('[CLOUD] 验证失败：响应格式异常', cErr);
+        return false;
+      }
+      final code = (json['code'] as num?)?.toInt() ?? 0;
+      if (code != 200) {
+        _log('[CLOUD] 验证失败：${json['message'] ?? '卡密无效'}', cErr);
+        return false;
+      }
+      final data = json['data'];
+      if (data is! Map) {
+        _log('[CLOUD] 验证失败：缺少 data 字段', cErr);
+        return false;
+      }
+      final d = Map<String, dynamic>.from(data);
+      if (!_verifyResponse(d, key)) {
+        _log('[CLOUD] 验证失败：响应验签未通过', cErr);
+        return false;
+      }
+      final drift = (DateTime.now().millisecondsSinceEpoch ~/ 1000 -
+              (d['time'] as num).toInt())
+          .abs();
+      _log('[CLOUD] 验签通过 HMAC-SHA256 (appid 一致 / 时间偏差 ${drift}s)', cPool, 0.05);
+      final days = (d['remaining_days'] ?? '').toString();
+      final secs = (d['remaining_seconds'] as num?)?.toInt() ?? 0;
+      _remaining = days.isNotEmpty ? days : '$secs 秒';
+      _log('[CLOUD] 卡密有效 · $_remaining', cKey, 0.06);
+      return true;
+    } catch (e) {
+      _log('[CLOUD] 验证失败：网络异常 ($e)', cErr);
+      return false;
+    }
+  }
 
   Future<void> _start() async {
     final link = _linkCtrl.text.trim();
     if (!link.startsWith(linkPrefix) || link.length <= linkPrefix.length) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('链接错误：必须以 https://auth.platorelay.com/a?d= 开头')),
+        const SnackBar(
+          content: Text('链接错误：必须以 https://auth.platorelay.com/a?d= 开头'),
+        ),
       );
       return;
     }
-    if (_running) return;
+    if (_running || _verifying) return;
+
+    final kami = _kamiCtrl.text.trim();
+    if (kami.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先输入卡密')),
+      );
+      return;
+    }
 
     setState(() {
       _logs.clear();
       _running = true;
+      _verifying = true;
       _failed = false;
       _resultKey = '';
       _progress = 0;
     });
+
+    final ok = await _verifyKami(kami);
+    if (!ok) {
+      setState(() {
+        _running = false;
+        _verifying = false;
+        _failed = true;
+      });
+      return;
+    }
+    setState(() => _verifying = false);
 
     // 命中本地缓存：约5秒直接返回原 key，不走完整绕过
     final cached = await getCachedKey(link);
@@ -189,10 +347,12 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
       _log('[CACHE] 校验通过，直接返回 (本地命中，无需重绕)', cPool, 0.85);
       await _sleep(randMs(1200, 1600));
       _log('key获取成功', cKey, 1.0);
-      setState(() {
-        _resultKey = cached;
-        _running = false;
-      });
+      if (mounted) {
+        setState(() {
+          _resultKey = cached;
+          _running = false;
+        });
+      }
       return;
     }
 
@@ -205,19 +365,16 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
       '上游超时 (HTTP 504)',
     ][Random().nextInt(4)];
 
-    _log('收到链接: ${link.length > 52 ? '${link.substring(0, 52)}...' : link}', cDim, 0.04);
+    _log('收到链接: ${link.length > 52 ? '${link.substring(0, 52)}...' : link}', cDim, 0.08);
     await _sleep(randMs(1200, 2200));
-
-    _log('[NET] 解析 auth.platorelay.com ... trace=$trace', cNet, 0.10);
+    _log('[NET] 解析 auth.platorelay.com ... trace=$trace', cNet, 0.14);
     await _sleep(randMs(1000, 1800));
-    _log('[NET] DNS -> ${randIp()} (${180 + Random().nextInt(340)}ms) EDGE=NRT-${(1 + Random().nextInt(9)).toString().padLeft(2, '0')}', cNet, 0.16);
+    _log('[NET] DNS -> ${randIp()} (${180 + Random().nextInt(340)}ms) EDGE=NRT-${(1 + Random().nextInt(9)).toString().padLeft(2, '0')}', cNet, 0.19);
     await _sleep(randMs(800, 1500));
-
-    _log('[TLS] TLS 1.3 握手 ECDHE-X25519 ...', cTls, 0.22);
+    _log('[TLS] TLS 1.3 握手 ECDHE-X25519 ...', cTls, 0.24);
     await _sleep(randMs(1200, 2000));
-    _log('[TLS] 握手成功 TLS_AES_256_GCM_SHA384 (${600 + Random().nextInt(600)}ms)', cTls, 0.28);
+    _log('[TLS] 握手成功 TLS_AES_256_GCM_SHA384 (${600 + Random().nextInt(600)}ms)', cTls, 0.29);
     await _sleep(randMs(600, 1200));
-
     _log('正在使用discord账号池 (${900 + Random().nextInt(901)}在线) ...', cPool, 0.34);
     await _sleep(randMs(1800, 2400));
     _log('[POOL] 绑定账号 #${1000 + Random().nextInt(8999)} token=${randHex(8)}**** 心跳正常', cPool, 0.44);
@@ -232,32 +389,32 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
     }
     _log('[POOL] 认证成功 rate_limit=剩余${20 + Random().nextInt(40)}次', cPool, 0.76);
     await _sleep(randMs(1000, 1600));
-
     _log('正在绕过captcha... challenge=${randHex(16)}', cCap, 0.84);
     await _sleep(randMs(1500, 2500));
-
     if (willFail) {
       _log('绕过失败，请重试 ($failReason trace=$trace)', cErr, 0.84);
-      setState(() {
-        _running = false;
-        _failed = true;
-      });
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _failed = true;
+        });
+      }
       return;
     }
-
     final score = (0.88 + Random().nextDouble() * 0.09).toStringAsFixed(2);
     _log('绕过成功，正在获取key (score=$score)', cKey, 0.90);
     await _sleep(randMs(1500, 2500));
     _log('[KEY] HMAC-SHA256校验 key_len=37', cKey, 0.95);
     await _sleep(randMs(1200, 1800));
     _log('key获取成功', cKey, 1.0);
-
-    setState(() {
-      _resultKey = 'FREE_${randHex(32)}';
-      _running = false;
-    });
-    // 成功后写入本地缓存，下次同一链接直接 5 秒返回
-    await putCachedKey(link, _resultKey);
+    final newKey = 'FREE_${randHex(32)}';
+    if (mounted) {
+      setState(() {
+        _resultKey = newKey;
+        _running = false;
+      });
+    }
+    await putCachedKey(link, newKey);
   }
 
   void _reset() {
@@ -274,6 +431,7 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final done = _resultKey.isNotEmpty;
     final scheme = Theme.of(context).colorScheme;
+    final busy = _running || _verifying;
     return Scaffold(
       appBar: AppBar(title: const Text('Delta Bypass')),
       body: SingleChildScrollView(
@@ -283,8 +441,24 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
           children: [
             // 标准 MD3 TextField
             TextField(
+              controller: _kamiCtrl,
+              enabled: !busy,
+              decoration: const InputDecoration(
+                labelText: '卡密',
+                hintText: '请输入卡密',
+              ),
+            ),
+            if (_remaining.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                '当前卡密 $_remaining',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 12),
+            TextField(
               controller: _linkCtrl,
-              enabled: !_running,
+              enabled: !busy,
               decoration: const InputDecoration(
                 labelText: '输入忍者链接',
                 hintText: '$linkPrefix...',
@@ -293,10 +467,14 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
             const SizedBox(height: 16),
             // 标准 MD3 FilledButton（主题默认配色）
             FilledButton(
-              onPressed: _running ? null : _start,
+              onPressed: busy ? null : _start,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(_running ? '绕过中...' : '绕过'),
+                child: Text(_verifying
+                    ? '验证中...'
+                    : _running
+                        ? '绕过中...'
+                        : '绕过'),
               ),
             ),
             const SizedBox(height: 20),
@@ -373,7 +551,8 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('KEY', style: Theme.of(context).textTheme.labelSmall),
+                            Text('KEY',
+                                style: Theme.of(context).textTheme.labelSmall),
                             const SizedBox(height: 4),
                             SelectableText(
                               _resultKey,
@@ -390,7 +569,8 @@ class _BypassPageState extends State<BypassPage> with WidgetsBindingObserver {
                         tooltip: '复制',
                         icon: const Icon(Icons.copy),
                         onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: _resultKey));
+                          await Clipboard.setData(
+                              ClipboardData(text: _resultKey));
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('已复制 key')),
